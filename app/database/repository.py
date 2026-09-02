@@ -682,6 +682,103 @@ class Database:
         finally:
             await connection.close()
 
+    async def replace_cart(
+        self,
+        telegram_user_id: int,
+        requested_items: list[tuple[int, int]],
+    ) -> list[dict]:
+        connection = await self.connect()
+
+        try:
+            await connection.execute("BEGIN IMMEDIATE")
+
+            if not requested_items:
+                raise CartError("Il carrello non può essere vuoto.")
+
+            product_ids = [product_id for product_id, _ in requested_items]
+
+            if len(product_ids) != len(set(product_ids)):
+                raise CartError("Il carrello contiene prodotti duplicati.")
+
+            placeholders = ",".join("?" for _ in product_ids)
+            cursor = await connection.execute(
+                f"""
+                SELECT products.*
+                FROM products
+                JOIN categories
+                  ON categories.id = products.category_id
+                WHERE products.id IN ({placeholders})
+                  AND products.active = 1
+                  AND categories.active = 1
+                """,
+                product_ids,
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            products = {row["id"]: row for row in rows}
+
+            if len(products) != len(product_ids):
+                raise CartError(
+                    "Uno o più prodotti non sono più disponibili."
+                )
+
+            normalized_items: list[tuple[int, int]] = []
+
+            for product_id, requested_quantity in requested_items:
+                if requested_quantity < 1 or requested_quantity > 99:
+                    raise CartError("Quantità non valida nel carrello.")
+
+                product = products[product_id]
+                quantity = (
+                    1
+                    if product["product_type"] == "digital"
+                    else requested_quantity
+                )
+                stock = product["stock_quantity"]
+
+                if stock is not None and quantity > stock:
+                    raise CartError(
+                        f"Quantità non disponibile per {product['name']}."
+                    )
+
+                normalized_items.append((product_id, quantity))
+
+            await connection.execute(
+                "DELETE FROM cart_items WHERE telegram_user_id = ?",
+                (telegram_user_id,),
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            await connection.executemany(
+                """
+                INSERT INTO cart_items (
+                    telegram_user_id,
+                    product_id,
+                    quantity,
+                    added_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        telegram_user_id,
+                        product_id,
+                        quantity,
+                        now,
+                        now,
+                    )
+                    for product_id, quantity in normalized_items
+                ],
+            )
+            await connection.commit()
+        except Exception:
+            await connection.rollback()
+            raise
+        finally:
+            await connection.close()
+
+        return await self.list_cart_items(telegram_user_id)
+
     async def create_digital_order(
         self,
         telegram_user_id: int,

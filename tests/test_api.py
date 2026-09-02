@@ -1,14 +1,66 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import hashlib
+import hmac
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from urllib.parse import urlencode
 
 from httpx import ASGITransport, AsyncClient
 
-from app.api import create_api
+from app.api import create_api, validate_telegram_init_data
 from app.config import Settings
 from app.database.repository import Database
+
+
+def build_init_data(
+    bot_token: str,
+    telegram_user_id: int,
+    auth_date: int,
+) -> str:
+    fields = {
+        "auth_date": str(auth_date),
+        "query_id": "test-query",
+        "user": json.dumps(
+            {
+                "id": telegram_user_id,
+                "first_name": "Test",
+                "username": "test_user",
+            },
+            separators=(",", ":"),
+        ),
+    }
+    data_check_string = "\n".join(
+        f"{key}={value}" for key, value in sorted(fields.items())
+    )
+    secret_key = hmac.new(
+        b"WebAppData",
+        bot_token.encode(),
+        hashlib.sha256,
+    ).digest()
+    fields["hash"] = hmac.new(
+        secret_key,
+        data_check_string.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return urlencode(fields)
+
+
+class FakeBot:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
+        self.messages.append(
+            {"chat_id": chat_id, "text": text, "kwargs": kwargs}
+        )
+
+    async def get_me(self) -> SimpleNamespace:
+        return SimpleNamespace(username="test_miniapp_bot")
 
 
 class MiniAppApiTests(unittest.IsolatedAsyncioTestCase):
@@ -74,6 +126,76 @@ class MiniAppApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+
+    async def test_signed_mini_app_cart_is_saved_and_sent_to_bot(self) -> None:
+        fake_bot = FakeBot()
+        app = create_api(self.database, self.settings, fake_bot)
+        transport = ASGITransport(app=app)
+        init_data = build_init_data(
+            self.settings.bot_token,
+            telegram_user_id=987654,
+            auth_date=int(datetime.now(timezone.utc).timestamp()),
+        )
+
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/api/cart/sync",
+                headers={
+                    "Origin": "https://miniapp.example.com",
+                    "X-Telegram-Init-Data": init_data,
+                },
+                json={
+                    "items": [
+                        {"product_id": 1, "quantity": 3},
+                        {"product_id": 3, "quantity": 2},
+                    ]
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["cart_count"], 3)
+        self.assertEqual(
+            response.json()["bot_url"],
+            "https://t.me/test_miniapp_bot",
+        )
+        items = await self.database.list_cart_items(987654)
+        quantities = {item["id"]: item["quantity"] for item in items}
+        self.assertEqual(quantities, {1: 1, 3: 2})
+        self.assertEqual(fake_bot.messages[0]["chat_id"], 987654)
+
+    async def test_cart_sync_rejects_unsigned_requests(self) -> None:
+        app = create_api(self.database, self.settings, FakeBot())
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/api/cart/sync",
+                headers={"Origin": "https://miniapp.example.com"},
+                json={"items": [{"product_id": 1, "quantity": 1}]},
+            )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_expired_init_data_is_rejected(self) -> None:
+        now = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+        init_data = build_init_data(
+            self.settings.bot_token,
+            telegram_user_id=123,
+            auth_date=int(now.timestamp()) - 3601,
+        )
+
+        with self.assertRaisesRegex(ValueError, "scaduta"):
+            validate_telegram_init_data(
+                init_data,
+                self.settings.bot_token,
+                now=now,
+            )
 
 
 if __name__ == "__main__":

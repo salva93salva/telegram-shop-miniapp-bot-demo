@@ -39,7 +39,7 @@ async def main() -> None:
     dispatcher.include_router(catalog.router)
     dispatcher.include_router(start.router)
 
-    api = create_api(database, settings)
+    api = create_api(database, settings, bot)
     api_server = uvicorn.Server(
         uvicorn.Config(
             api,
