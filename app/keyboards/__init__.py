@@ -1,0 +1,1 @@
+"""Tastiere Telegram del negozio."""

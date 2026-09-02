@@ -1,0 +1,1 @@
+"""Database del negozio."""
