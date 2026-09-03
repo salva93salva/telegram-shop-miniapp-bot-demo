@@ -8,6 +8,7 @@
 - catalogo, prezzi, immagini, scorte e file digitali;
 - username o contatto di assistenza;
 - account Railway o altro hosting intestato al cliente;
+- account o servizio di hosting per la Mini App grafica;
 - condizioni di vendita, privacy, rimborsi e spedizioni applicabili.
 
 Non chiedere mai al cliente password personali. Il token può essere inserito
@@ -27,6 +28,7 @@ dal cliente direttamente nelle variabili private dell'hosting.
 10. Eseguire `python -m unittest discover -v`.
 11. Verificare il volume persistente `/data` sull'hosting.
 12. Fare un backup del database prima della messa online.
+13. Verificare che la Mini App usi l'indirizzo del backend del cliente.
 
 ## Attivazione dei pagamenti reali
 
@@ -37,6 +39,7 @@ anche il flusso di assistenza e rimborso previsto da Telegram.
 ## Materiale da consegnare
 
 - codice sorgente senza `.env` e senza database contenente dati reali;
+- codice della vetrina grafica nella cartella `webapp`;
 - file `.env.example` privo di segreti;
 - istruzioni di avvio e distribuzione;
 - credenziali e proprietà degli account lasciate al cliente;

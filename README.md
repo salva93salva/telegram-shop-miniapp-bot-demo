@@ -28,16 +28,19 @@ e usa token, database e distribuzione propri.
 - eliminazione confermata dei prodotti con conservazione degli ordini storici;
 - caricamento del file digitale da consegnare dopo l'acquisto;
 - foto del prodotto mostrate direttamente nel catalogo;
+- Mini App e-commerce responsive inclusa nella cartella `webapp`;
+- foto intere e proporzionate nella vetrina, senza ritagli;
+- trasferimento sicuro del carrello dalla Mini App al bot;
 - notifica privata agli amministratori per ogni nuovo ordine;
 - controllo dello stato del servizio;
 - download privato di un backup SQLite coerente;
 - database SQLite con migrazioni automatiche;
-- 34 test automatici.
+- 40 test automatici.
 
 ## Avvio su Windows
 
 ```powershell
-cd $HOME\Documents\telegram-shop-bot
+cd $HOME\Documents\telegram-shop-miniapp-bot
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -61,6 +64,8 @@ SHOP_NAME="Nome del negozio"
 DATABASE_PATH=data/shop.db
 PAYMENT_MODE=demo
 SUPPORT_CONTACT="@username_assistenza"
+MINI_APP_URL=https://indirizzo-pubblico-della-mini-app.example.com
+API_HOST=0.0.0.0
 ```
 
 Valori di `PAYMENT_MODE`:
@@ -70,6 +75,27 @@ Valori di `PAYMENT_MODE`:
 
 Il comando `/admin` è disponibile soltanto in chat privata agli ID elencati
 in `ADMIN_IDS`. Più amministratori possono essere separati da virgole.
+
+## Mini App grafica
+
+Il codice completo della vetrina è nella cartella `webapp`. L'indirizzo del
+backend non è fisso: ogni cliente può configurare il proprio servizio.
+
+```powershell
+cd webapp
+Copy-Item .env.example .env.local
+notepad .env.local
+npm install
+npm run dev
+```
+
+Nel file `.env.local` inserire l'indirizzo HTTPS pubblico del backend:
+
+```ini
+NEXT_PUBLIC_API_BASE_URL=https://backend-del-cliente.example.com
+```
+
+Per creare la versione pronta alla pubblicazione usare `npm run build`.
 
 ## Test
 
@@ -91,6 +117,7 @@ Nelle variabili private del servizio Railway inserire:
 - `DATABASE_PATH=/data/shop.db`;
 - `PAYMENT_MODE=demo` durante il collaudo;
 - `SUPPORT_CONTACT`;
+- `MINI_APP_URL`, con l'indirizzo HTTPS pubblico della vetrina;
 - `RAILPACK_PYTHON_VERSION=3.13`.
 
 Per non perdere ordini, scorte e prodotti dopo un nuovo deploy, collegare un
