@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from time import time
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from dotenv import load_dotenv
 
@@ -103,6 +104,15 @@ def load_settings() -> Settings:
         raise RuntimeError(
             "MINI_APP_URL deve contenere un indirizzo HTTPS valido."
         )
+
+    mini_app_url = parsed_mini_app_url._replace(
+        query=urlencode(
+            [
+                *parse_qsl(parsed_mini_app_url.query),
+                ("app_version", str(int(time()))),
+            ]
+        )
+    ).geturl()
 
     api_host = os.getenv("API_HOST", "0.0.0.0").strip()
 
