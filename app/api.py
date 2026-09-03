@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import hmac
+from io import BytesIO
 import json
 from urllib.parse import parse_qsl, urlparse
 
 from aiogram import Bot
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.config import Settings
@@ -107,6 +109,8 @@ def serialize_product(product: dict) -> dict:
             or product["stock_quantity"] > 0
         )
 
+    has_photo = bool(product["has_photo"])
+
     return {
         "id": product["id"],
         "sku": product["sku"],
@@ -124,7 +128,12 @@ def serialize_product(product: dict) -> dict:
         },
         "stock_quantity": product["stock_quantity"],
         "available": available,
-        "has_photo": bool(product["has_photo"]),
+        "has_photo": has_photo,
+        "photo_url": (
+            f"/api/products/{product['id']}/photo"
+            if has_photo
+            else None
+        ),
     }
 
 
@@ -165,6 +174,42 @@ def create_api(
                 for product in products
             ],
         }
+
+    @app.get("/api/products/{product_id}/photo")
+    async def product_photo(product_id: int) -> StreamingResponse:
+        if bot is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Servizio immagini non disponibile.",
+            )
+
+        product = await database.get_active_product(product_id)
+
+        if product is None or not product["photo_file_id"]:
+            raise HTTPException(
+                status_code=404,
+                detail="Foto prodotto non disponibile.",
+            )
+
+        image = BytesIO()
+
+        try:
+            await bot.download(
+                product["photo_file_id"],
+                destination=image,
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Impossibile recuperare la foto da Telegram.",
+            ) from error
+
+        image.seek(0)
+        return StreamingResponse(
+            image,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=300"},
+        )
 
     @app.post("/api/cart/sync")
     async def sync_cart(

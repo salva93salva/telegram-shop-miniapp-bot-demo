@@ -62,6 +62,9 @@ class FakeBot:
     async def get_me(self) -> SimpleNamespace:
         return SimpleNamespace(username="test_miniapp_bot")
 
+    async def download(self, file_id: str, destination) -> None:
+        destination.write(b"fake-jpeg-content")
+
 
 class MiniAppApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -114,6 +117,34 @@ class MiniAppApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("delivery_content", product)
         self.assertNotIn("delivery_file_id", product)
         self.assertNotIn("photo_file_id", product)
+
+    async def test_product_photo_is_proxied_without_exposing_file_id(
+        self,
+    ) -> None:
+        connection = await self.database.connect()
+        await connection.execute(
+            "UPDATE products SET photo_file_id = ? WHERE id = 1",
+            ("telegram-photo-file-id",),
+        )
+        await connection.commit()
+        await connection.close()
+        app = create_api(self.database, self.settings, FakeBot())
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+        ) as client:
+            catalog_response = await client.get("/api/catalog")
+            photo_response = await client.get("/api/products/1/photo")
+
+        product = catalog_response.json()["products"][0]
+        self.assertTrue(product["has_photo"])
+        self.assertEqual(product["photo_url"], "/api/products/1/photo")
+        self.assertNotIn("telegram-photo-file-id", str(product))
+        self.assertEqual(photo_response.status_code, 200)
+        self.assertEqual(photo_response.content, b"fake-jpeg-content")
+        self.assertEqual(photo_response.headers["content-type"], "image/jpeg")
 
     async def test_health_endpoint(self) -> None:
         transport = ASGITransport(app=self.app)
